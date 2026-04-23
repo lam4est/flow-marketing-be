@@ -7,12 +7,17 @@ namespace App\Controller;
 use App\Entity\ContactList;
 use App\Entity\User;
 use App\Entity\Workflow\Workflow;
+use App\Entity\Workflow\WorkflowRun;
 use App\Entity\Workflow\WorkflowStep;
+use App\Entity\Workflow\WorkflowStepRun;
 use App\Entity\Workflow\WorkflowStepUser;
 use App\Entity\Workflow\WorkflowUser;
+use App\Message\WorkflowRunTriggeredMessage;
 use App\Repository\ContactListRepository;
 use App\Repository\Workflow\WorkflowRepository;
+use App\Repository\Workflow\WorkflowRunRepository;
 use App\Repository\Workflow\WorkflowStepRepository;
+use App\Repository\Workflow\WorkflowStepRunRepository;
 use App\Repository\Workflow\WorkflowStepUserRepository;
 use App\Repository\Workflow\WorkflowUserRepository;
 use App\Service\CurrentUserResolver;
@@ -22,6 +27,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
 final class WorkflowApiController
@@ -31,9 +37,12 @@ final class WorkflowApiController
         private readonly CurrentUserResolver $currentUserResolver,
         private readonly WorkflowUserRepository $workflowUserRepository,
         private readonly WorkflowRepository $workflowRepository,
+        private readonly WorkflowRunRepository $workflowRunRepository,
         private readonly WorkflowStepRepository $workflowStepRepository,
+        private readonly WorkflowStepRunRepository $workflowStepRunRepository,
         private readonly WorkflowStepUserRepository $workflowStepUserRepository,
         private readonly ContactListRepository $contactListRepository,
+        private readonly MessageBusInterface $messageBus,
     ) {
     }
 
@@ -180,6 +189,48 @@ final class WorkflowApiController
         $this->em->flush();
 
         return new JsonResponse(['ok' => true]);
+    }
+
+    #[Route('/api/workflow-users/{id<\d+>}/trigger', name: 'api_workflow_user_trigger', methods: ['POST'])]
+    public function triggerWorkflow(Request $request, int $id): JsonResponse
+    {
+        $user = $this->currentUserResolver->resolveUser($request);
+        $wu = $this->workflowUserRepository->find($id);
+        if (!$wu instanceof WorkflowUser || $wu->getUser()->getId() !== $user->getId()) {
+            throw new NotFoundHttpException('Workflow user not found.');
+        }
+
+        $run = (new WorkflowRun())
+            ->setWorkflowUser($wu)
+            ->setStatus(WorkflowRun::STATUS_QUEUED)
+            ->setTriggerSource('manual_api');
+        $this->em->persist($run);
+        $this->em->flush();
+
+        $this->messageBus->dispatch(new WorkflowRunTriggeredMessage($run->getId()));
+
+        return new JsonResponse([
+            'ok' => true,
+            'workflow_run' => $this->serializeWorkflowRun($run, []),
+        ], Response::HTTP_ACCEPTED);
+    }
+
+    #[Route('/api/workflow-users/{id<\d+>}/runs', name: 'api_workflow_user_runs', methods: ['GET'])]
+    public function listRuns(Request $request, int $id): JsonResponse
+    {
+        $user = $this->currentUserResolver->resolveUser($request);
+        $wu = $this->workflowUserRepository->find($id);
+        if (!$wu instanceof WorkflowUser || $wu->getUser()->getId() !== $user->getId()) {
+            throw new NotFoundHttpException('Workflow user not found.');
+        }
+
+        $items = [];
+        foreach ($this->workflowRunRepository->findLatestByWorkflowUser($wu, 30) as $run) {
+            $stepRuns = $this->workflowStepRunRepository->findByWorkflowRunOrdered($run);
+            $items[] = $this->serializeWorkflowRun($run, $stepRuns);
+        }
+
+        return new JsonResponse(['items' => $items]);
     }
 
     private function decodeJson(Request $request): array
@@ -360,6 +411,51 @@ final class WorkflowApiController
             'description' => $workflow->getDescription(),
             'segment_id' => $wu->getSegment()?->getId(),
             'steps' => $out,
+            'runs' => $this->serializeWorkflowRuns($wu),
+        ];
+    }
+
+    private function serializeWorkflowRuns(WorkflowUser $workflowUser): array
+    {
+        $output = [];
+        foreach ($this->workflowRunRepository->findLatestByWorkflowUser($workflowUser, 10) as $run) {
+            $stepRuns = $this->workflowStepRunRepository->findByWorkflowRunOrdered($run);
+            $output[] = $this->serializeWorkflowRun($run, $stepRuns);
+        }
+
+        return $output;
+    }
+
+    /**
+     * @param list<WorkflowStepRun> $stepRuns
+     */
+    private function serializeWorkflowRun(WorkflowRun $run, array $stepRuns): array
+    {
+        $steps = [];
+        foreach ($stepRuns as $stepRun) {
+            $steps[] = [
+                'id' => $stepRun->getId(),
+                'workflow_step_id' => $stepRun->getWorkflowStep()->getId(),
+                'status' => $stepRun->getStatus(),
+                'channel_used' => $stepRun->getChannelUsed(),
+                'template_id_used' => $stepRun->getTemplateIdUsed(),
+                'scheduled_at' => $stepRun->getScheduledAt()?->format(DATE_ATOM),
+                'started_at' => $stepRun->getStartedAt()?->format(DATE_ATOM),
+                'finished_at' => $stepRun->getFinishedAt()?->format(DATE_ATOM),
+                'error_message' => $stepRun->getErrorMessage(),
+                'payload_snapshot' => $stepRun->getPayloadSnapshot(),
+                'dispatch_reference' => $stepRun->getDispatchReference(),
+            ];
+        }
+
+        return [
+            'id' => $run->getId(),
+            'status' => $run->getStatus(),
+            'trigger_source' => $run->getTriggerSource(),
+            'started_at' => $run->getStartedAt()?->format(DATE_ATOM),
+            'finished_at' => $run->getFinishedAt()?->format(DATE_ATOM),
+            'error_message' => $run->getErrorMessage(),
+            'steps' => $steps,
         ];
     }
 }

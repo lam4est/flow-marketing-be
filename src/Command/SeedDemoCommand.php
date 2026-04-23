@@ -195,6 +195,8 @@ final class SeedDemoCommand extends Command
         }
 
         foreach ([
+            'workflow_step_run',
+            'workflow_run',
             'scheduler_event_history',
             'scheduler_event_subscription',
             'workflow_step_user',
