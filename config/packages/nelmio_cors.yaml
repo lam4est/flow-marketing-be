@@ -1,0 +1,11 @@
+nelmio_cors:
+    defaults:
+        origin_regex: true
+        # Vite default: localhost / 127.0.0.1 with any port (e.g. 5173)
+        allow_origin: ['^https?://(localhost|127\.0\.0\.1)(:\d+)?$']
+        allow_methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
+        allow_headers: ['Content-Type', 'Authorization', 'X-User-Id']
+        expose_headers: ['Link']
+        max_age: 3600
+    paths:
+        '^/api': ~
