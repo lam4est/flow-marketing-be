@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Entity\Contact;
 use App\Entity\ContactList;
+use App\Entity\ContentTemplate;
+use App\Entity\MarketingCampaign;
 use App\Entity\SchedulerEvent;
 use App\Entity\SchedulerEventSubscription;
 use App\Entity\User;
@@ -54,8 +57,62 @@ final class SeedDemoCommand extends Command
         $list = (new ContactList())
             ->setOwner($user)
             ->setName('Demo segment')
-            ->setContactsCount(42);
+            ->setContactsCount(3);
         $this->em->persist($list);
+        $this->em->flush();
+
+        foreach ([
+            ['Ada Lovelace', 'ada@example.com', null],
+            ['Grace Hopper', 'grace@example.com', '+12025550142'],
+            ['No Email', null, '+12025550199'],
+        ] as [$name, $email, $phone]) {
+            $ct = (new Contact())
+                ->setOwner($user)
+                ->setContactList($list)
+                ->setDisplayName($name)
+                ->setEmail($email)
+                ->setPhone($phone);
+            $this->em->persist($ct);
+        }
+        $this->em->flush();
+
+        $tplEmail = (new ContentTemplate())
+            ->setOwner($user)
+            ->setName('Welcome email')
+            ->setChannel(ContentTemplate::CHANNEL_EMAIL)
+            ->setSubject('Welcome aboard')
+            ->setBody("Hi {{name}},\n\nThanks for joining. We're glad you're here.");
+        $tplSms = (new ContentTemplate())
+            ->setOwner($user)
+            ->setName('Promo SMS')
+            ->setChannel(ContentTemplate::CHANNEL_SMS)
+            ->setSubject(null)
+            ->setBody('Special offer for you — reply STOP to opt out.');
+        $this->em->persist($tplEmail);
+        $this->em->persist($tplSms);
+        $this->em->flush();
+
+        $mcWelcome = (new MarketingCampaign())
+            ->setOwner($user)
+            ->setName('Welcome blast')
+            ->setDescription('One-shot welcome message to the demo segment')
+            ->setChannel(MarketingCampaign::CHANNEL_EMAIL)
+            ->setStatus(MarketingCampaign::STATUS_DRAFT)
+            ->setContactList($list)
+            ->setContentTemplate($tplEmail)
+            ->setScheduleMode(MarketingCampaign::SCHEDULE_MANUAL);
+        $mcSms = (new MarketingCampaign())
+            ->setOwner($user)
+            ->setName('SMS flash sale')
+            ->setDescription('Scheduled SMS example (cron placeholder)')
+            ->setChannel(MarketingCampaign::CHANNEL_SMS)
+            ->setStatus(MarketingCampaign::STATUS_SCHEDULED)
+            ->setContactList($list)
+            ->setContentTemplate($tplSms)
+            ->setScheduleMode(MarketingCampaign::SCHEDULE_CRON)
+            ->setCronExpression('0 9 * * 1');
+        $this->em->persist($mcWelcome);
+        $this->em->persist($mcSms);
         $this->em->flush();
 
         $wf1 = (new Workflow())
@@ -204,6 +261,9 @@ final class SeedDemoCommand extends Command
             'workflow_step',
             'workflows',
             'scheduler_event',
+            'marketing_campaign_send',
+            'marketing_campaign',
+            'content_template',
             'contact',
             'contact_list',
             'users',

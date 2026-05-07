@@ -9,8 +9,9 @@
 parameters:
     # Defaults when env vars are absent (override in .env.local)
     env(WORKFLOW_MAIL_FROM): 'noreply@localhost'
-    env(WORKFLOW_SMS_WEBHOOK_URL): ''
-    env(WORKFLOW_SMS_DEFAULT_TO): ''
+    env(WORKFLOW_EMAIL_WEBHOOK_URL): ''
+    env(WORKFLOW_SMS_WEBHOOK_URL): 'http://localhost:5678/webhook-test/send-sms'
+    env(WORKFLOW_SMS_DEFAULT_TO): '+84325748252'
 
 services:
     # default configuration for services in *this* file

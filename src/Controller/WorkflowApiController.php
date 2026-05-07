@@ -26,6 +26,7 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
@@ -56,6 +57,87 @@ final class WorkflowApiController
         }
 
         return new JsonResponse($items);
+    }
+
+    #[Route('/api/workflow-catalog', name: 'api_workflow_catalog', methods: ['GET'])]
+    public function catalog(Request $request): JsonResponse
+    {
+        $user = $this->currentUserResolver->resolveUser($request);
+        $enrolled = [];
+        foreach ($this->workflowUserRepository->findForUser($user) as $wu) {
+            $wfId = $wu->getWorkflow()->getId();
+            if ($wfId !== null) {
+                $enrolled[$wfId] = $wu->getId();
+            }
+        }
+
+        $workflows = $this->workflowRepository->findBy([], ['workflowName' => 'ASC']);
+        $items = [];
+        foreach ($workflows as $w) {
+            $wid = $w->getId();
+            if ($wid === null) {
+                continue;
+            }
+            $items[] = [
+                'id' => $wid,
+                'name' => $w->getWorkflowName(),
+                'category' => $w->getCategory(),
+                'description' => $w->getDescription(),
+                'workflow_user_id' => $enrolled[$wid] ?? null,
+            ];
+        }
+
+        return new JsonResponse(['items' => $items]);
+    }
+
+    #[Route('/api/workflow-users', name: 'api_workflow_users_create', methods: ['POST'])]
+    public function createWorkflowUser(Request $request): JsonResponse
+    {
+        $user = $this->currentUserResolver->resolveUser($request);
+        $data = $this->decodeJson($request);
+        $workflowId = isset($data['workflow_id']) ? (int) $data['workflow_id'] : 0;
+        if ($workflowId < 1) {
+            throw new BadRequestHttpException('workflow_id is required.');
+        }
+
+        $workflow = $this->workflowRepository->find($workflowId);
+        if (!$workflow instanceof Workflow) {
+            throw new NotFoundHttpException('Workflow template not found.');
+        }
+
+        if ($this->workflowUserRepository->findOneByUserAndWorkflow($user, $workflow) instanceof WorkflowUser) {
+            throw new ConflictHttpException('This workflow is already in your list.');
+        }
+
+        $wu = (new WorkflowUser())
+            ->setUser($user)
+            ->setOriginalWorkflow($workflow)
+            ->setWorkflow($workflow)
+            ->setIsActive(false);
+        $this->em->persist($wu);
+        $this->em->flush();
+
+        foreach ($this->workflowStepRepository->findByWorkflowOrdered($workflow) as $step) {
+            $this->createWorkflowStepUser($user, $wu, $step);
+        }
+        $this->em->flush();
+
+        return new JsonResponse($this->serializeWorkflowUserForList($wu), Response::HTTP_CREATED);
+    }
+
+    #[Route('/api/workflow-users/{id<\d+>}', name: 'api_workflow_users_delete', methods: ['DELETE'])]
+    public function deleteWorkflowUser(Request $request, int $id): JsonResponse
+    {
+        $user = $this->currentUserResolver->resolveUser($request);
+        $wu = $this->workflowUserRepository->find($id);
+        if (!$wu instanceof WorkflowUser || $wu->getUser()->getId() !== $user->getId()) {
+            throw new NotFoundHttpException('Workflow enrollment not found.');
+        }
+
+        $this->em->remove($wu);
+        $this->em->flush();
+
+        return new JsonResponse(['ok' => true]);
     }
 
     #[Route('/api/workflows/{workflowId<\d+>}/detail', name: 'api_workflows_detail', methods: ['GET'])]
@@ -99,6 +181,7 @@ final class WorkflowApiController
             throw new NotFoundHttpException('Workflow user not found.');
         }
 
+        $wasActive = $wu->isActive();
         $data = $this->decodeJson($request);
 
         if (\array_key_exists('is_active', $data)) {
@@ -160,6 +243,10 @@ final class WorkflowApiController
 
         $this->em->flush();
 
+        if (!$wasActive && $wu->isActive()) {
+            $this->enqueueWorkflowRunOnActivation($wu);
+        }
+
         return new JsonResponse($this->serializeWorkflowUserForList($wu));
     }
 
@@ -213,6 +300,21 @@ final class WorkflowApiController
             'ok' => true,
             'workflow_run' => $this->serializeWorkflowRun($run, []),
         ], Response::HTTP_ACCEPTED);
+    }
+
+    /**
+     * Starts one workflow run when the user turns the Campaign Workflow toggle on (architecture A: Symfony orchestrates, n8n sends).
+     */
+    private function enqueueWorkflowRunOnActivation(WorkflowUser $wu): void
+    {
+        $run = (new WorkflowRun())
+            ->setWorkflowUser($wu)
+            ->setStatus(WorkflowRun::STATUS_QUEUED)
+            ->setTriggerSource('workflow_activated');
+        $this->em->persist($run);
+        $this->em->flush();
+
+        $this->messageBus->dispatch(new WorkflowRunTriggeredMessage($run->getId()));
     }
 
     #[Route('/api/workflow-users/{id<\d+>}/runs', name: 'api_workflow_user_runs', methods: ['GET'])]
