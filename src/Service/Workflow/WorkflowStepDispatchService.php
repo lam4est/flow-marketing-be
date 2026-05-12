@@ -115,9 +115,11 @@ final readonly class WorkflowStepDispatchService
             throw new \RuntimeException('Content template not found or not owned by user.');
         }
 
-        $expectedChannel = \in_array($channel, ['sms', 'rcs'], true)
-            ? ContentTemplate::CHANNEL_SMS
-            : ContentTemplate::CHANNEL_EMAIL;
+        $expectedChannel = match ($channel) {
+            'sms' => ContentTemplate::CHANNEL_SMS,
+            'rcs' => ContentTemplate::CHANNEL_RCS,
+            default => ContentTemplate::CHANNEL_EMAIL,
+        };
         if ($template->getChannel() !== $expectedChannel) {
             throw new \RuntimeException('Template channel does not match workflow step channel.');
         }
@@ -133,6 +135,9 @@ final readonly class WorkflowStepDispatchService
                         $excludedIds[$id] = true;
                     }
                 }
+            }
+            foreach ($stepUser->getExcludedContactIds() as $xcid) {
+                $excludedIds[$xcid] = true;
             }
         }
 
@@ -162,6 +167,8 @@ final readonly class WorkflowStepDispatchService
             if ($webhook === '') {
                 throw new \RuntimeException('WORKFLOW_SMS_WEBHOOK_URL must be set for segment SMS/RCS workflow steps.');
             }
+            $smsStepSettings = $stepUser?->getSettings();
+            $smsStepSettings = \is_array($smsStepSettings) ? $smsStepSettings : [];
             foreach ($contacts as $contact) {
                 $to = $this->normalizePhone($contact->getPhone());
                 if ($to === null || $to === '') {
@@ -177,6 +184,7 @@ final readonly class WorkflowStepDispatchService
                     'workflow_step_id' => $stepId,
                     'workflow_step_run_id' => $stepRunId,
                     'contact_id' => $contact->getId(),
+                    'settings' => $smsStepSettings,
                 ];
                 $this->postJsonWebhook(
                     $webhook,
@@ -199,7 +207,7 @@ final readonly class WorkflowStepDispatchService
                     continue;
                 }
                 $subject = $template->getSubject();
-                if ($subject === null || trim($subject) === '') {
+                if (trim($subject) === '') {
                     $subject = $workflowName;
                 }
                 $subject = $this->personalize($subject, $contact);

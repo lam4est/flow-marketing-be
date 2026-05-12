@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Entity\Contact;
 use App\Entity\ContactList;
 use App\Entity\User;
 use App\Entity\Workflow\Workflow;
@@ -14,6 +15,7 @@ use App\Entity\Workflow\WorkflowStepUser;
 use App\Entity\Workflow\WorkflowUser;
 use App\Message\WorkflowRunTriggeredMessage;
 use App\Repository\ContactListRepository;
+use App\Repository\ContactRepository;
 use App\Repository\Workflow\WorkflowRepository;
 use App\Repository\Workflow\WorkflowRunRepository;
 use App\Repository\Workflow\WorkflowStepRepository;
@@ -43,6 +45,7 @@ final class WorkflowApiController
         private readonly WorkflowStepRunRepository $workflowStepRunRepository,
         private readonly WorkflowStepUserRepository $workflowStepUserRepository,
         private readonly ContactListRepository $contactListRepository,
+        private readonly ContactRepository $contactRepository,
         private readonly MessageBusInterface $messageBus,
     ) {
     }
@@ -230,6 +233,9 @@ final class WorkflowApiController
                     $settings = $row['settings'];
                     $wsu->setSettings(\is_array($settings) ? $settings : null);
                 }
+                if (\array_key_exists('excluded_contact_ids', $row)) {
+                    $wsu->setExcludedContactIds($this->resolveExcludedContactIds($user, $row['excluded_contact_ids']));
+                }
                 if (\array_key_exists('excluded_segment_ids', $row)) {
                     $ids = $row['excluded_segment_ids'];
                     $first = null;
@@ -363,6 +369,31 @@ final class WorkflowApiController
         return $list;
     }
 
+    /** @return list<int> Normalized contact ids (empty array clears stored exclusions). */
+    private function resolveExcludedContactIds(User $user, mixed $raw): array
+    {
+        if ($raw === null) {
+            return [];
+        }
+        if (!\is_array($raw)) {
+            throw new BadRequestHttpException('excluded_contact_ids must be an array of contact ids.');
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            $cid = (int) $item;
+            if ($cid < 1) {
+                continue;
+            }
+            $contact = $this->contactRepository->findOwnedById($user, $cid);
+            if (!$contact instanceof Contact) {
+                throw new BadRequestHttpException(sprintf('Contact %d not found.', $cid));
+            }
+            $out[] = $cid;
+        }
+
+        return array_values(array_unique($out));
+    }
+
     private function createWorkflowStepUser(User $user, WorkflowUser $wu, WorkflowStep $step): WorkflowStepUser
     {
         $wsu = (new WorkflowStepUser())
@@ -370,7 +401,7 @@ final class WorkflowApiController
             ->setWorkflowUser($wu)
             ->setWorkflowStep($step)
             ->setChannel($step->getChannel())
-            ->setIsActive(true)
+            ->setIsActive(false)
             ->setDelayInMinutes($this->delayMinutesFromTemplate($step));
 
         $this->em->persist($wsu);
@@ -469,8 +500,9 @@ final class WorkflowApiController
             'delay_unit' => $parts['unit'],
             'template_id' => $templateId,
             'template_name' => '',
-            'is_active' => $su === null || $su->isActive(),
+            'is_active' => $su?->isActive() ?? false,
             'excluded_segment_id' => $excluded,
+            'excluded_contact_ids' => $su !== null ? $su->getExcludedContactIds() : [],
             'settings' => $su?->getSettings(),
         ];
     }
@@ -499,9 +531,10 @@ final class WorkflowApiController
                 'delay_value' => $parts['value'],
                 'delay_unit' => $parts['unit'],
                 'delay_in_minutes' => $minutes,
-                'is_active' => $su === null || $su->isActive(),
+                'is_active' => $su?->isActive() ?? false,
                 'is_confirmed_by_user' => $su?->isConfirmedByUser() ?? false,
                 'excluded_segment_id' => $excluded,
+                'excluded_contact_ids' => $su !== null ? $su->getExcludedContactIds() : [],
                 'settings' => $su?->getSettings() ?? [],
             ];
         }

@@ -17,6 +17,7 @@ class ContentTemplate
 
     public const CHANNEL_EMAIL = 'email';
     public const CHANNEL_SMS = 'sms';
+    public const CHANNEL_RCS = 'rcs';
 
     #[ORM\Id]
     #[ORM\GeneratedValue]
@@ -33,8 +34,8 @@ class ContentTemplate
     #[ORM\Column(length: 20)]
     private string $channel = self::CHANNEL_EMAIL;
 
-    #[ORM\Column(length: 500, nullable: true)]
-    private ?string $subject = null;
+    #[ORM\Column(length: 500)]
+    private string $subject = '';
 
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $body = null;
@@ -80,12 +81,12 @@ class ContentTemplate
         return $this;
     }
 
-    public function getSubject(): ?string
+    public function getSubject(): string
     {
         return $this->subject;
     }
 
-    public function setSubject(?string $subject): static
+    public function setSubject(string $subject): static
     {
         $this->subject = $subject;
 

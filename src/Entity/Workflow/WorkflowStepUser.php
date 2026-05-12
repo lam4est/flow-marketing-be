@@ -37,8 +37,8 @@ class WorkflowStepUser
     #[ORM\Column(name: 'template_id', length: 36, nullable: true)]
     private ?string $templateId = null;
 
-    #[ORM\Column(name: 'is_active', options: ['default' => true])]
-    private bool $isActive = true;
+    #[ORM\Column(name: 'is_active', options: ['default' => false])]
+    private bool $isActive = false;
 
     #[ORM\Column(name: 'is_confirmed_by_user', options: ['default' => false])]
     private bool $isConfirmedByUser = false;
@@ -58,6 +58,10 @@ class WorkflowStepUser
 
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $settings = null;
+
+    /** @var list<int>|null Explicit contact ids to exclude from this step (within campaign segment). */
+    #[ORM\Column(name: 'excluded_contact_ids', type: 'json', nullable: true)]
+    private ?array $excludedContactIds = null;
 
     public function getId(): ?int
     {
@@ -192,6 +196,49 @@ class WorkflowStepUser
     public function setSettings(?array $settings): static
     {
         $this->settings = $settings;
+
+        return $this;
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function getExcludedContactIds(): array
+    {
+        if ($this->excludedContactIds === null || $this->excludedContactIds === []) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($this->excludedContactIds as $id) {
+            $n = (int) $id;
+            if ($n > 0) {
+                $out[] = $n;
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * @param list<int>|null $excludedContactIds
+     */
+    public function setExcludedContactIds(?array $excludedContactIds): static
+    {
+        if ($excludedContactIds === null || $excludedContactIds === []) {
+            $this->excludedContactIds = null;
+
+            return $this;
+        }
+        $out = [];
+        foreach ($excludedContactIds as $id) {
+            $n = (int) $id;
+            if ($n > 0) {
+                $out[] = $n;
+            }
+        }
+        $out = array_values(array_unique($out));
+        $this->excludedContactIds = $out === [] ? null : $out;
 
         return $this;
     }
