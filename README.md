@@ -20,6 +20,7 @@ Symfony API for marketing workflows, multi-channel send, and n8n integration.
 From this repository root:
 
 ```bash
+cp .env.example .env   # required for Symfony / compose (not committed)
 docker compose up -d
 docker compose exec backend php bin/console app:seed-demo
 ```
