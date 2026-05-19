@@ -13,6 +13,7 @@
 /.env.test
 /.env.local
 /.env.*.local
+!.env.example
 /vendor/
 /var/
 node_modules/

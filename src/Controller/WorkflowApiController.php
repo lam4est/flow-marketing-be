@@ -409,7 +409,7 @@ final class WorkflowApiController
         return $wsu;
     }
 
-    private function delayMinutesFromTemplate(WorkflowStep $step): ?int
+    private function delayMinutesFromTemplate(WorkflowStep $step): int
     {
         $v = $step->getDelayValue();
         $u = $step->getDelayUnit();
@@ -454,7 +454,7 @@ final class WorkflowApiController
             return $su->getDelayInMinutes();
         }
 
-        return $this->delayMinutesFromTemplate($template) ?? 0;
+        return $this->delayMinutesFromTemplate($template);
     }
 
     private function serializeWorkflowUserForList(WorkflowUser $wu): array

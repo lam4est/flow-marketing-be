@@ -130,7 +130,7 @@ final readonly class CampaignWorkflowN8nListService
             $payload['recipients'] = array_values(array_filter(array_map(
                 static function ($contact): ?array {
                     $phone = $contact->getPhone();
-                    if ($phone === null || trim($phone) === '') {
+                    if (trim($phone) === '') {
                         return null;
                     }
 
@@ -337,7 +337,7 @@ final readonly class CampaignWorkflowN8nListService
         ];
     }
 
-    private function delayMinutesFromTemplate(WorkflowStep $step): ?int
+    private function delayMinutesFromTemplate(WorkflowStep $step): int
     {
         $v = $step->getDelayValue();
         $u = $step->getDelayUnit();
@@ -382,6 +382,6 @@ final readonly class CampaignWorkflowN8nListService
             return $su->getDelayInMinutes();
         }
 
-        return $this->delayMinutesFromTemplate($template) ?? 0;
+        return $this->delayMinutesFromTemplate($template);
     }
 }

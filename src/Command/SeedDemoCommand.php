@@ -16,6 +16,7 @@ use App\Entity\Workflow\WorkflowStepUser;
 use App\Entity\Workflow\WorkflowUser;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -108,8 +109,22 @@ final class SeedDemoCommand extends Command
         }
         $this->em->flush();
 
+        $welcomeWuId = null;
+        foreach ($this->em->getRepository(WorkflowUser::class)->findBy(['user' => $user], ['id' => 'ASC']) as $wu) {
+            if ($wu->getWorkflow()->getWorkflowKey() === 'welcome_activation') {
+                $welcomeWuId = $wu->getId();
+                break;
+            }
+        }
+
         $output->writeln(sprintf('Demo data loaded. Default API user: id=%d (%s).', $user->getId(), $user->getEmail()));
-        $output->writeln('Use the same DATABASE_URL as your API. Set frontend VITE_USER_ID to this id (expect 1 after a fresh seed on PostgreSQL/SQLite).');
+        $output->writeln('Set VITE_USER_ID and X-User-Id to this id (expect 1 after a fresh seed).');
+        if ($welcomeWuId !== null) {
+            $output->writeln(sprintf(
+                'E2E: POST /api/workflow-users/%d/trigger (Welcome Activation, step 1 SMS active).',
+                $welcomeWuId,
+            ));
+        }
 
         return Command::SUCCESS;
     }
@@ -145,7 +160,7 @@ final class SeedDemoCommand extends Command
             }
         }
 
-        $this->resetUsersTableAutoIncrement($conn, $platform);
+        $this->resetTableIdSequences($conn, $platform);
 
         if ($isSqlite) {
             $conn->executeStatement('PRAGMA foreign_keys = ON');
@@ -153,18 +168,37 @@ final class SeedDemoCommand extends Command
     }
 
     /**
-     * After DELETE FROM users, PostgreSQL/SQLite still advance the next id (e.g. 46).
-     * Reset so the demo user is always id=1 and matches frontend VITE_USER_ID=1.
+     * After DELETE, PostgreSQL/SQLite sequences still advance (e.g. workflow_user id=20).
+     * Reset so demo ids stay predictable: user=1, workflow_user=1 for Welcome Activation, etc.
      */
-    private function resetUsersTableAutoIncrement(Connection $conn, AbstractPlatform $platform): void
+    private function resetTableIdSequences(Connection $conn, AbstractPlatform $platform): void
     {
+        $tables = [
+            'users',
+            'contact_list',
+            'contact',
+            'content_template',
+            'workflows',
+            'workflow_step',
+            'workflow_user',
+            'workflow_step_user',
+            'workflow_run',
+            'workflow_step_run',
+            'scheduler_event',
+            'scheduler_event_subscription',
+            'scheduler_event_history',
+        ];
+
         if ($platform instanceof PostgreSQLPlatform) {
-            try {
-                $conn->executeStatement(
-                    'SELECT setval(pg_get_serial_sequence(\'users\', \'id\'), 1, false)'
-                );
-            } catch (\Throwable) {
-                // serial sequence missing or non-serial id column
+            foreach ($tables as $table) {
+                try {
+                    $conn->executeStatement(sprintf(
+                        "SELECT setval(pg_get_serial_sequence('%s', 'id'), 1, false)",
+                        $table,
+                    ));
+                } catch (\Throwable) {
+                    // table or serial sequence may not exist
+                }
             }
 
             return;
@@ -172,7 +206,9 @@ final class SeedDemoCommand extends Command
 
         if ($platform instanceof SQLitePlatform) {
             try {
-                $conn->executeStatement("DELETE FROM sqlite_sequence WHERE name = 'users'");
+                foreach ($tables as $table) {
+                    $conn->executeStatement('DELETE FROM sqlite_sequence WHERE name = ?', [$table]);
+                }
             } catch (\Throwable) {
                 // sqlite_sequence may not exist
             }
@@ -564,13 +600,15 @@ final class SeedDemoCommand extends Command
         $this->em->persist($wu);
         $this->em->flush();
 
-        foreach ($steps as $step) {
+        foreach ($steps as $index => $step) {
+            // E2E-ready: active enrollment gets step 1 enabled (immediate SMS on trigger).
+            $stepActive = $def['isActive'] && $index === 0;
             $wsu = (new WorkflowStepUser())
                 ->setUser($user)
                 ->setWorkflowUser($wu)
                 ->setWorkflowStep($step)
                 ->setChannel($step->getChannel())
-                ->setIsActive(false)
+                ->setIsActive($stepActive)
                 ->setTemplateId($this->demoTemplateIdForChannel($step->getChannel()))
                 ->setDelayInMinutes($this->delayMinutesFromTemplate($step))
                 ->setIsConfirmedByUser(true);

@@ -76,7 +76,9 @@
         ],
         "post-update-cmd": [
             "@auto-scripts"
-        ]
+        ],
+        "phpstan": "phpstan analyse --memory-limit=512M",
+        "lint:php": "php -l src && find src -name '*.php' -print0 | xargs -0 -n1 php -l"
     },
     "conflict": {
         "symfony/symfony": "*"
@@ -88,6 +90,9 @@
         }
     },
     "require-dev": {
+        "phpstan/phpstan": "^2.1",
+        "phpstan/phpstan-doctrine": "^2.0",
+        "phpstan/phpstan-symfony": "^2.0",
         "phpunit/phpunit": "^12.5",
         "symfony/browser-kit": "7.4.*",
         "symfony/css-selector": "7.4.*",

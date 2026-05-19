@@ -1,0 +1,75 @@
+x-backend-env: &backend-env
+  APP_ENV: dev
+  APP_DEBUG: 1
+  APP_SECRET: ${APP_SECRET:-758bac3b0b4392046818d95f122a2fa6}
+  DEFAULT_URI: http://backend:8000
+  DB_HOST: db
+  DB_PORT: 5432
+  DB_NAME: app_db
+  DB_USER: postgres
+  DB_PASSWORD: 123456
+  WORKFLOW_MAIL_FROM: noreply@localhost
+  WORKFLOW_EMAIL_WEBHOOK_URL: http://host.docker.internal:5678/webhook/send-email
+  WORKFLOW_SMS_WEBHOOK_URL: http://host.docker.internal:5678/webhook/send-sms
+  WORKFLOW_SMS_DEFAULT_TO: ""
+  MESSENGER_TRANSPORT_DSN: doctrine://default?auto_setup=0
+
+services:
+  db:
+    image: postgres:16
+    container_name: marketing-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: app_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+    container_name: marketing-backend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment: *backend-env
+    ports:
+      - "5679:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -lc "composer install --no-interaction &&
+      php bin/console doctrine:migrations:migrate --no-interaction &&
+      php -S 0.0.0.0:8000 -t public public/index.php"
+
+  messenger-worker:
+    build:
+      context: .
+    container_name: marketing-messenger-worker
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment: *backend-env
+    depends_on:
+      - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -lc "composer install --no-interaction &&
+      php bin/console messenger:consume async --time-limit=3600 --memory-limit=256M -vv"
+
+volumes:
+  db_data:
