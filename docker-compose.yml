@@ -17,7 +17,6 @@ x-backend-env: &backend-env
 services:
   db:
     image: postgres:16
-    container_name: marketing-db
     restart: unless-stopped
     environment:
       POSTGRES_DB: app_db
@@ -36,7 +35,6 @@ services:
   backend:
     build:
       context: .
-    container_name: marketing-backend
     restart: unless-stopped
     working_dir: /app
     volumes:
@@ -49,15 +47,11 @@ services:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: >
-      sh -lc "composer install --no-interaction &&
-      php bin/console doctrine:migrations:migrate --no-interaction &&
-      php -S 0.0.0.0:8000 -t public public/index.php"
+    command: sh /app/scripts/start-backend.sh
 
   messenger-worker:
     build:
       context: .
-    container_name: marketing-messenger-worker
     restart: unless-stopped
     working_dir: /app
     volumes:
@@ -67,9 +61,7 @@ services:
       - backend
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: >
-      sh -lc "composer install --no-interaction &&
-      php bin/console messenger:consume async --time-limit=3600 --memory-limit=256M -vv"
+    command: sh /app/scripts/start-worker.sh
 
 volumes:
   db_data:
